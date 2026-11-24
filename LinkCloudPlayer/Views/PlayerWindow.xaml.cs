@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -13,15 +14,27 @@ public partial class PlayerWindow : Window
     private bool _isSeeking;
     private bool _isFullscreen;
     private static readonly float[] Rates = [0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f];
+    private static readonly string VlcLogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "LinkCloudPlayer",
+        "vlc.log"
+    );
 
     public PlayerWindow(string title, string streamUrl)
     {
         InitializeComponent();
         Title = title;
 
-        _libVlc = new LibVLC();
+        // --avcodec-hw=none: software decoding only. Hardware-accelerated
+        // video decode/render is the most common source of a silent native
+        // crash (unrecoverable - can't be caught by any .NET try/catch) in
+        // LibVLC-based players; this trades some CPU usage for reliability.
+        // If playback is smooth without crashing, this can be relaxed later.
+        _libVlc = new LibVLC(enableDebugLogs: true, "--avcodec-hw=none");
+        _libVlc.Log += OnVlcLog;
         _mediaPlayer = new MediaPlayer(_libVlc);
         VlcVideoView.MediaPlayer = _mediaPlayer;
+        VolumeSlider.Value = 100; // set after _mediaPlayer exists - OnVolumeChanged fires immediately
 
         _mediaPlayer.TimeChanged += OnTimeChanged;
         _mediaPlayer.LengthChanged += OnLengthChanged;
@@ -138,6 +151,15 @@ public partial class PlayerWindow : Window
         Dispatcher.Invoke(() => TimeText.Text = $"{FormatTime(_mediaPlayer.Time)} / {FormatTime(e.Length)}");
     }
 
+    private void OnVlcLog(object? sender, LogEventArgs e)
+    {
+        try
+        {
+            File.AppendAllText(VlcLogPath, $"[{DateTime.Now:O}] [{e.Level}] {e.Module}: {e.Message}\n");
+        }
+        catch { /* logging must never crash playback */ }
+    }
+
     private void ShowPlaybackError()
     {
         ErrorText.Text = "Can't play this file. The codec may not be supported, or the server is unreachable.";
@@ -174,6 +196,7 @@ public partial class PlayerWindow : Window
 
     private void OnVolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
+        if (_mediaPlayer is null) return;
         _mediaPlayer.Volume = (int)e.NewValue;
     }
 
@@ -253,6 +276,7 @@ public partial class PlayerWindow : Window
         _mediaPlayer.Stop();
         VlcVideoView.MediaPlayer = null;
         _mediaPlayer.Dispose();
+        _libVlc.Log -= OnVlcLog;
         _libVlc.Dispose();
     }
 }

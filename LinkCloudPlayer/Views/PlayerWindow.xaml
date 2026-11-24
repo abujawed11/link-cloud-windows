@@ -42,7 +42,7 @@
                         <Button Content="⏪10" Style="{StaticResource BarButton}" Click="OnSkipBackClick" />
                         <Button Content="10⏩" Style="{StaticResource BarButton}" Click="OnSkipForwardClick" />
                         <Button x:Name="MuteButton" Content="🔊" Style="{StaticResource BarButton}" Click="OnMuteClick" />
-                        <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Value="100" Width="90"
+                        <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Width="90"
                                 VerticalAlignment="Center" ValueChanged="OnVolumeChanged" />
                         <TextBlock x:Name="TimeText" Foreground="White" VerticalAlignment="Center"
                                    Margin="12,0,0,0" Text="0:00 / 0:00" />
