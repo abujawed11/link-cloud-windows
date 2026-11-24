@@ -1,0 +1,16 @@
+# Visual Studio / .NET build output
+[Bb]in/
+[Oo]bj/
+.vs/
+
+# User-specific files
+*.user
+*.suo
+
+# NuGet
+*.nupkg
+**/packages/*
+
+# Rider / VS Code
+.idea/
+.vscode/
