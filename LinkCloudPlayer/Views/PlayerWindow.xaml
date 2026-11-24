@@ -8,66 +8,12 @@
         Title="Player" Height="700" Width="1100"
         Background="Black"
         KeyDown="OnKeyDown">
-    <Window.Resources>
-        <Style TargetType="Button" x:Key="BarButton">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="8,4" />
-            <Setter Property="FontSize" Value="15" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-        <Style TargetType="MenuItem">
-            <Setter Property="Foreground" Value="Black" />
-        </Style>
-    </Window.Resources>
-
-    <Grid x:Name="RootGrid">
+    <Grid>
         <vlc:VideoView x:Name="VlcVideoView" MouseLeftButtonUp="OnVideoClick" />
 
         <TextBlock x:Name="ErrorText" Foreground="#f87171" FontSize="16"
                    HorizontalAlignment="Center" VerticalAlignment="Center"
                    TextWrapping="Wrap" MaxWidth="500" TextAlignment="Center"
                    Visibility="Collapsed" />
-
-        <Border x:Name="ControlBar" VerticalAlignment="Bottom" Background="#CC000000" Padding="12,8">
-            <StackPanel>
-                <Slider x:Name="SeekSlider" Minimum="0" Maximum="1000"
-                        PreviewMouseDown="OnSeekDragStart" PreviewMouseUp="OnSeekDragEnd"
-                        ValueChanged="OnSeekValueChanged" Margin="0,0,0,6" />
-
-                <DockPanel>
-                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                        <Button x:Name="PlayPauseButton" Content="⏸" Style="{StaticResource BarButton}" Click="OnPlayPauseClick" />
-                        <Button Content="⏪10" Style="{StaticResource BarButton}" Click="OnSkipBackClick" />
-                        <Button Content="10⏩" Style="{StaticResource BarButton}" Click="OnSkipForwardClick" />
-                        <Button x:Name="MuteButton" Content="🔊" Style="{StaticResource BarButton}" Click="OnMuteClick" />
-                        <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Width="90"
-                                VerticalAlignment="Center" ValueChanged="OnVolumeChanged" />
-                        <TextBlock x:Name="TimeText" Foreground="White" VerticalAlignment="Center"
-                                   Margin="12,0,0,0" Text="0:00 / 0:00" />
-                    </StackPanel>
-
-                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                        <Button x:Name="SpeedButton" Content="1x" Style="{StaticResource BarButton}" Click="OnSpeedClick">
-                            <Button.ContextMenu>
-                                <ContextMenu x:Name="SpeedMenu" />
-                            </Button.ContextMenu>
-                        </Button>
-                        <Button x:Name="AudioButton" Content="Audio" Style="{StaticResource BarButton}" Click="OnAudioClick">
-                            <Button.ContextMenu>
-                                <ContextMenu x:Name="AudioMenu" />
-                            </Button.ContextMenu>
-                        </Button>
-                        <Button x:Name="SubtitleButton" Content="Subtitles" Style="{StaticResource BarButton}" Click="OnSubtitleClick">
-                            <Button.ContextMenu>
-                                <ContextMenu x:Name="SubtitleMenu" />
-                            </Button.ContextMenu>
-                        </Button>
-                        <Button x:Name="FullscreenButton" Content="⛶" Style="{StaticResource BarButton}" Click="OnFullscreenClick" />
-                    </StackPanel>
-                </DockPanel>
-            </StackPanel>
-        </Border>
     </Grid>
 </Window>
