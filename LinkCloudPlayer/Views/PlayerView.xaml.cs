@@ -45,7 +45,7 @@ public partial class PlayerView : UserControl
     private bool _ended;
 
     private bool _isFullscreen;
-    private Rect _restoreBounds;
+    private WINDOWPLACEMENT _restorePlacement;
     private WindowState _restoreState;
     private WindowStyle _restoreStyle;
     private ResizeMode _restoreResizeMode;
@@ -197,50 +197,116 @@ public partial class PlayerView : UserControl
     }
 
     // ───────────────────────── Fullscreen ─────────────────────────
-    // WindowStyle=None + WindowState=Maximized is unreliable in WPF (the
-    // window overhangs the screen edges and the taskbar can stay on top), so
-    // instead the host window is sized to exactly cover its monitor.
+    // Fullscreen = borderless window sized to exactly cover its monitor
+    // (WindowStyle=None + Maximized is unreliable in WPF: the window
+    // overhangs the screen edges and the taskbar can stay on top).
+    //
+    // Smoothness: changing WPF's WindowState/WindowStyle/Left/Top/Width/
+    // Height one by one makes the window visibly step through every
+    // intermediate state (plus the Windows minimize/maximize animation and
+    // the overlay lagging behind), which looks like stuttering. Instead:
+    //  - the Windows window animation is switched off for the transition,
+    //  - the overlay is hidden until it has been re-positioned,
+    //  - the geometry change is ONE Win32 call (SetWindowPos for the monitor
+    //    rect, SetWindowPlacement to go back - straight to maximized if the
+    //    window was maximized before).
 
     private void ToggleFullscreen()
     {
         if (_host is null) return;
-        if (!_isFullscreen)
-        {
-            _restoreState = _host.WindowState;
-            _restoreStyle = _host.WindowStyle;
-            _restoreResizeMode = _host.ResizeMode;
-            _restoreBounds = _host.WindowState == WindowState.Normal
-                ? new Rect(_host.Left, _host.Top, _host.Width, _host.Height)
-                : _host.RestoreBounds;
+        var hwnd = new WindowInteropHelper(_host).Handle;
+        if (hwnd == IntPtr.Zero) return;
 
-            var monitor = GetMonitorBoundsDip(_host);
-            _host.WindowState = WindowState.Normal; // must leave Maximized before resizing manually
-            _host.WindowStyle = WindowStyle.None;
-            _host.ResizeMode = ResizeMode.NoResize;
-            _host.Left = monitor.Left;
-            _host.Top = monitor.Top;
-            _host.Width = monitor.Width;
-            _host.Height = monitor.Height;
-            _isFullscreen = true;
-        }
-        else
-        {
-            _isFullscreen = false;
-            _host.WindowStyle = _restoreStyle;
-            _host.ResizeMode = _restoreResizeMode;
-            _host.Left = _restoreBounds.Left;
-            _host.Top = _restoreBounds.Top;
-            _host.Width = _restoreBounds.Width;
-            _host.Height = _restoreBounds.Height;
-            if (_restoreState == WindowState.Maximized) _host.WindowState = WindowState.Maximized;
-        }
+        SetTransitionsDisabled(hwnd, true);
+        if (_controls is not null) _controls.Opacity = 0;
+
+        if (!_isFullscreen) EnterFullscreen(hwnd);
+        else ExitFullscreen(hwnd);
 
         UpdateTopmost();
         _controls?.SetFullscreenState(_isFullscreen);
-        // Style changes shift the client area without always raising
-        // LocationChanged/SizeChanged - re-sync once layout has settled.
-        Dispatcher.BeginInvoke(PositionControls, DispatcherPriority.Loaded);
         _host.Activate();
+
+        // Once layout has caught up with the new size: put the overlay back
+        // exactly over the video, show it, and give the window its normal
+        // animations back.
+        Dispatcher.BeginInvoke(() =>
+        {
+            PositionControls();
+            if (_controls is not null) _controls.Opacity = 1;
+            SetTransitionsDisabled(hwnd, false);
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void EnterFullscreen(IntPtr hwnd)
+    {
+        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info)) return;
+        var m = info.rcMonitor;
+
+        _restoreState = _host!.WindowState;
+        _restoreStyle = _host.WindowStyle;
+        _restoreResizeMode = _host.ResizeMode;
+        _restorePlacement = new WINDOWPLACEMENT { length = Marshal.SizeOf<WINDOWPLACEMENT>() };
+        GetWindowPlacement(hwnd, ref _restorePlacement); // normal bounds, even while maximized
+
+        _host.ResizeMode = ResizeMode.NoResize;
+        _host.WindowStyle = WindowStyle.None;
+
+        if (_restoreState == WindowState.Maximized)
+        {
+            // Un-maximize straight onto the monitor rect (instead of first
+            // shrinking back to the old normal size). Placement uses
+            // work-area-relative coordinates.
+            var dx = info.rcWork.Left - m.Left;
+            var dy = info.rcWork.Top - m.Top;
+            var p = _restorePlacement;
+            p.flags = 0;
+            p.showCmd = SW_SHOWNORMAL;
+            p.rcNormalPosition = new RECT { Left = m.Left - dx, Top = m.Top - dy, Right = m.Right - dx, Bottom = m.Bottom - dy };
+            SetWindowPlacement(hwnd, ref p);
+        }
+
+        // Exact screen coordinates, one call.
+        SetWindowPos(hwnd, IntPtr.Zero, m.Left, m.Top, m.Right - m.Left, m.Bottom - m.Top,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        _isFullscreen = true;
+    }
+
+    private void ExitFullscreen(IntPtr hwnd)
+    {
+        _isFullscreen = false;
+        _host!.WindowStyle = _restoreStyle;
+        _host.ResizeMode = _restoreResizeMode;
+
+        // One step back to exactly where the window was - maximized or not.
+        var p = _restorePlacement;
+        p.flags = 0;
+        if (_restoreState == WindowState.Maximized)
+        {
+            // Maximize directly from the fullscreen rect (SetWindowPlacement
+            // alone would first jump to the old normal size, then maximize),
+            // then - already maximized, so nothing moves - put back the
+            // remembered normal bounds for a later un-maximize.
+            ShowWindow(hwnd, SW_MAXIMIZE);
+            p.showCmd = SW_SHOWMAXIMIZED;
+        }
+        else
+        {
+            p.showCmd = SW_SHOWNORMAL;
+        }
+        SetWindowPlacement(hwnd, ref p);
+    }
+
+    private static void SetTransitionsDisabled(IntPtr hwnd, bool disabled)
+    {
+        try
+        {
+            var value = disabled ? 1 : 0;
+            DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, ref value, sizeof(int));
+        }
+        catch { /* cosmetic only */ }
     }
 
     // Stay above the taskbar while fullscreen, but only while this app is in
@@ -253,25 +319,8 @@ public partial class PlayerView : UserControl
         if (_host is null) return;
         var appActive = Application.Current.Windows.OfType<Window>().Any(w => w.IsActive);
         var topmost = _isFullscreen && appActive;
-        _host.Topmost = topmost;
-        if (_controls is not null) _controls.Topmost = topmost;
-    }
-
-    private static Rect GetMonitorBoundsDip(Window window)
-    {
-        var hwnd = new WindowInteropHelper(window).Handle;
-        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
-            return new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
-
-        var dpi = VisualTreeHelper.GetDpi(window);
-        var r = info.rcMonitor;
-        return new Rect(
-            r.Left / dpi.DpiScaleX,
-            r.Top / dpi.DpiScaleY,
-            (r.Right - r.Left) / dpi.DpiScaleX,
-            (r.Bottom - r.Top) / dpi.DpiScaleY);
+        if (_host.Topmost != topmost) _host.Topmost = topmost;
+        if (_controls is not null && _controls.Topmost != topmost) _controls.Topmost = topmost;
     }
 
     // ───────────────────────── Teardown ─────────────────────────
@@ -319,9 +368,19 @@ public partial class PlayerView : UserControl
     // ───────────────────────── Win32 ─────────────────────────
 
     private const uint MONITOR_DEFAULTTONEAREST = 2;
+    private const int SW_SHOWNORMAL = 1;
+    private const int SW_SHOWMAXIMIZED = 3;
+    private const int SW_MAXIMIZE = 3;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_FRAMECHANGED = 0x0020;
+    private const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MONITORINFO
@@ -332,9 +391,35 @@ public partial class PlayerView : UserControl
         public uint dwFlags;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WINDOWPLACEMENT
+    {
+        public int length;
+        public int flags;
+        public int showCmd;
+        public POINT ptMinPosition;
+        public POINT ptMaxPosition;
+        public RECT rcNormalPosition;
+    }
+
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
 
     [DllImport("user32.dll")]
     private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }
