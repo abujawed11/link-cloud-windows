@@ -1,19 +1,13 @@
 <Window x:Class="LinkCloudPlayer.Views.PlayerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
-        mc:Ignorable="d"
-        Title="Player" Height="700" Width="1100"
+        Title="Player" Height="700" Width="1100" MinWidth="480" MinHeight="300"
         Background="Black"
         KeyDown="OnKeyDown">
-    <Grid>
+    <!-- All UI (controls, spinner, errors) lives in PlayerControlsWindow:
+         anything placed here would be hidden behind the native video surface. -->
+    <Grid x:Name="Root">
         <vlc:VideoView x:Name="VlcVideoView" />
-
-        <TextBlock x:Name="ErrorText" Foreground="#f87171" FontSize="16"
-                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                   TextWrapping="Wrap" MaxWidth="500" TextAlignment="Center"
-                   Visibility="Collapsed" />
     </Grid>
 </Window>
