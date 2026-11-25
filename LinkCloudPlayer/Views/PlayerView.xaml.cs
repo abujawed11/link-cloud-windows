@@ -20,10 +20,15 @@ namespace LinkCloudPlayer.Views;
 /// </summary>
 public partial class PlayerView : UserControl
 {
-    // How much VLC buffers ahead for network streams. Higher = smoother on
-    // unreliable connections, at the cost of a slightly longer wait when
-    // starting and after each seek. (VLC's default is ~1s.)
-    private const int NetworkCachingMs = 10_000;
+    // VLC's decoder-level buffer ("pts delay") for network streams. Keep this
+    // at VLC's default of 1s: measured on these files, anything above ~1.5s
+    // makes the audio decoder lag the video on resume/seek, so VLC drops
+    // and flushes audio (an audible cut right after un-pausing) and pausing
+    // takes effect late. Read-ahead of the actual download is handled
+    // separately, below the decoders, by VLC's 16 MB "prefetch" stream
+    // filter - that's what keeps playback smooth and what the buffered bar
+    // shows.
+    private const int NetworkCachingMs = 1_000;
 
     private readonly FileItem _file;
     private readonly long _startMs;
