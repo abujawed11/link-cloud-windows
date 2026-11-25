@@ -54,6 +54,14 @@ public partial class PlayerControlsWindow : Window
     private bool _volumeDragging;
     private int _volume = 100;
 
+    // Set when this window closes. PlayerView disposes the native player right
+    // after that, but WPF can still deliver events here afterwards (MouseLeave
+    // when the window disappears, lost mouse capture, libvlc callbacks already
+    // queued on the dispatcher). Touching the disposed player from any of
+    // them is a native access violation that kills the app, so every entry
+    // point that uses _mediaPlayer checks this first.
+    private bool _closed;
+
     // UI state
     private bool _chromeVisible = true;
     private bool _isFullscreen;
@@ -104,7 +112,8 @@ public partial class PlayerControlsWindow : Window
             _hideTimer.Start();
             _bufferTimer.Start();
         };
-        Closed += (_, _) => UnsubscribeAll();
+        Closing += (_, _) => _closed = true;
+        Closed += (_, _) => { _closed = true; UnsubscribeAll(); };
     }
 
     private void UnsubscribeAll()
@@ -144,6 +153,7 @@ public partial class PlayerControlsWindow : Window
     /// <summary>Handles a player keyboard shortcut. Returns true if the key was used.</summary>
     public bool HandleKey(Key key)
     {
+        if (_closed) return false;
         var shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
         switch (key)
         {
@@ -202,6 +212,7 @@ public partial class PlayerControlsWindow : Window
 
     private void TogglePlayPause(bool flash)
     {
+        if (_closed) return;
         var state = _mediaPlayer.State;
         if (state == VLCState.Ended || state == VLCState.Stopped)
         {
@@ -232,6 +243,7 @@ public partial class PlayerControlsWindow : Window
 
     private void Skip(long deltaMs)
     {
+        if (_closed) return;
         if (_mediaPlayer.Length <= 0) return;
         SeekTo(CurrentTimeMs + deltaMs);
         Flash(null, deltaMs > 0 ? "+10s" : "−10s");
@@ -240,6 +252,7 @@ public partial class PlayerControlsWindow : Window
 
     private void SeekToFraction(double fraction)
     {
+        if (_closed) return;
         if (_mediaPlayer.Length <= 0) return;
         SeekTo((long)(fraction * _mediaPlayer.Length));
         ShowChrome();
@@ -247,6 +260,7 @@ public partial class PlayerControlsWindow : Window
 
     private void SeekTo(long ms)
     {
+        if (_closed) return;
         var length = _mediaPlayer.Length;
         if (length <= 0) return;
         ms = Math.Clamp(ms, 0, Math.Max(length - 500, 0));
@@ -271,13 +285,21 @@ public partial class PlayerControlsWindow : Window
 
     private void SetRate(float rate)
     {
+        if (_closed) return;
         _rate = rate;
         _mediaPlayer.SetRate(rate);
     }
 
     // ───────────────────────── libvlc events (raised on libvlc threads) ─────────────────────────
 
-    private void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs e) => Dispatcher.BeginInvoke(() =>
+    // Marshals a libvlc event onto the UI thread, dropping it if this window
+    // has closed in the meantime (see _closed).
+    private void OnUi(Action action) => Dispatcher.BeginInvoke(() =>
+    {
+        if (!_closed) action();
+    });
+
+    private void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs e) => OnUi(() =>
     {
         if (_scrubbing) return;
         if (_pendingSeekMs is long target)
@@ -293,25 +315,25 @@ public partial class PlayerControlsWindow : Window
     });
 
     private void OnLengthChanged(object? sender, MediaPlayerLengthChangedEventArgs e) =>
-        Dispatcher.BeginInvoke(() => UpdateProgress(CurrentTimeMs, e.Length));
+        OnUi(() => UpdateProgress(CurrentTimeMs, e.Length));
 
-    private void OnPlaying(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() =>
+    private void OnPlaying(object? sender, EventArgs e) => OnUi(() =>
     {
         PlayPauseIcon.Data = (Geometry)FindResource("IconPause");
         SetBuffering(false);
         RestartHideTimer();
     });
 
-    private void OnPaused(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() =>
+    private void OnPaused(object? sender, EventArgs e) => OnUi(() =>
     {
         PlayPauseIcon.Data = (Geometry)FindResource("IconPlay");
         ShowChrome();
     });
 
-    private void OnStopped(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() =>
+    private void OnStopped(object? sender, EventArgs e) => OnUi(() =>
         PlayPauseIcon.Data = (Geometry)FindResource("IconPlay"));
 
-    private void OnEndReached(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() =>
+    private void OnEndReached(object? sender, EventArgs e) => OnUi(() =>
     {
         PlayPauseIcon.Data = (Geometry)FindResource("IconPlay");
         SetBuffering(false);
@@ -321,7 +343,7 @@ public partial class PlayerControlsWindow : Window
 
     // libvlc reports how full its input cache is (0-100) during the initial
     // load and on every re-buffer (e.g. right after a seek).
-    private void OnBuffering(object? sender, MediaPlayerBufferingEventArgs e) => Dispatcher.BeginInvoke(() =>
+    private void OnBuffering(object? sender, MediaPlayerBufferingEventArgs e) => OnUi(() =>
     {
         if (e.Cache >= 100) SetBuffering(false);
         else SetBuffering(true, $"Buffering {e.Cache:0}%");
@@ -352,6 +374,7 @@ public partial class PlayerControlsWindow : Window
     // for a progress hint.
     private void UpdateBuffered()
     {
+        if (_closed) return;
         var length = _mediaPlayer.Length;
         if (length <= 0 || _totalBytes <= 0) return;
         if (_readBytes() is not long read) return;
@@ -375,6 +398,7 @@ public partial class PlayerControlsWindow : Window
 
     private void OnSeekMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (_closed) return;
         e.Handled = true;
         if (_mediaPlayer.Length <= 0) return;
         _scrubbing = true;
@@ -400,6 +424,7 @@ public partial class PlayerControlsWindow : Window
 
     private void OnSeekLostCapture(object sender, MouseEventArgs e)
     {
+        if (_closed) { _scrubbing = false; return; }
         if (!_scrubbing) return;     // capture stolen mid-drag (e.g. alt-tab) - commit what we have
         _scrubbing = false;
         CommitScrub();
@@ -407,6 +432,7 @@ public partial class PlayerControlsWindow : Window
 
     private void Scrub(double fraction)
     {
+        if (_closed) return;
         _scrubFraction = fraction;
         var length = _mediaPlayer.Length;
         RenderSeekBar(fraction);
@@ -416,12 +442,14 @@ public partial class PlayerControlsWindow : Window
 
     private void CommitScrub()
     {
+        if (_closed) return;
         SeekTo((long)(_scrubFraction * _mediaPlayer.Length));
         if (!SeekArea.IsMouseOver) OnSeekMouseLeave(SeekArea, null);
     }
 
     private void ShowSeekHover(double fraction)
     {
+        if (_closed) return;
         var length = _mediaPlayer.Length;
         if (length <= 0) return;
         var width = SeekArea.ActualWidth;
@@ -456,6 +484,7 @@ public partial class PlayerControlsWindow : Window
 
     private void OnTimeTextClick(object sender, MouseButtonEventArgs e)
     {
+        if (_closed) return;
         e.Handled = true;
         _showRemaining = !_showRemaining;
         UpdateTimeText(CurrentTimeMs, _mediaPlayer.Length);
@@ -465,6 +494,7 @@ public partial class PlayerControlsWindow : Window
 
     private void SetVolume(int volume, bool showFlash)
     {
+        if (_closed) return;
         _volume = Math.Clamp(volume, 0, 100);
         _mediaPlayer.Volume = _volume;
         if (_mediaPlayer.Mute && _volume > 0) _mediaPlayer.Mute = false;
@@ -474,6 +504,7 @@ public partial class PlayerControlsWindow : Window
 
     private void ToggleMute()
     {
+        if (_closed) return;
         _mediaPlayer.Mute = !_mediaPlayer.Mute;
         RenderVolume();
         Flash(VolumeIconKey());
@@ -585,6 +616,7 @@ public partial class PlayerControlsWindow : Window
 
     private void BuildTracksPanel()
     {
+        if (_closed) return;
         AudioOptions.Children.Clear();
         foreach (var track in _mediaPlayer.AudioTrackDescription)
         {
@@ -644,6 +676,7 @@ public partial class PlayerControlsWindow : Window
 
     private void LoadExternalSubtitle()
     {
+        if (_closed) return;
         var dialog = new OpenFileDialog
         {
             Filter = "Subtitle files|*.srt;*.ass;*.ssa;*.vtt|All files|*.*",
@@ -699,13 +732,15 @@ public partial class PlayerControlsWindow : Window
 
     private void OnRootMouseLeave(object sender, MouseEventArgs e)
     {
+        if (_closed) return;
         if (CanAutoHide()) HideChrome();
     }
 
     // ───────────────────────── Auto-hide ─────────────────────────
 
     private bool CanAutoHide() =>
-        _mediaPlayer.IsPlaying
+        !_closed
+        && _mediaPlayer.IsPlaying
         && !_scrubbing
         && !_volumeDragging
         && !AnyPanelOpen
@@ -714,6 +749,7 @@ public partial class PlayerControlsWindow : Window
 
     private void ShowChrome()
     {
+        if (_closed) return;
         if (!_chromeVisible)
         {
             _chromeVisible = true;
