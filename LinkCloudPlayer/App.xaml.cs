@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Threading;
 using LibVLCSharp.Shared;
+using LinkCloudPlayer.Services;
 
 namespace LinkCloudPlayer;
 
@@ -10,16 +11,11 @@ namespace LinkCloudPlayer;
 /// </summary>
 public partial class App : Application
 {
-    public static readonly string LogPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "LinkCloudPlayer",
-        "crash.log"
-    );
-
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
+        // Clean up logs from older builds (huge, and containing the login token) off the UI thread.
+        Task.Run(AppLog.ScrubExistingLogs);
 
         // Managed exceptions that would otherwise close the app silently.
         // A NATIVE crash (e.g. inside libvlc's video renderer) can't be
@@ -43,12 +39,6 @@ public partial class App : Application
         Core.Initialize(); // loads libvlc from the VideoLAN.LibVLC.Windows package; must run once before any LibVLC instance
     }
 
-    public static void LogToFile(string source, Exception? ex)
-    {
-        try
-        {
-            File.AppendAllText(LogPath, $"[{DateTime.Now:O}] {source}: {ex}\n\n");
-        }
-        catch { /* logging must never itself crash the app */ }
-    }
+    public static void LogToFile(string source, Exception? ex) =>
+        AppLog.Write("crash.log", $"{source}: {ex}{Environment.NewLine}");
 }

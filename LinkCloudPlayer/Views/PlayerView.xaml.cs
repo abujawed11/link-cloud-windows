@@ -50,10 +50,6 @@ public partial class PlayerView : UserControl
     private WindowStyle _restoreStyle;
     private ResizeMode _restoreResizeMode;
 
-    private static readonly string VlcLogPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "LinkCloudPlayer",
-        "vlc.log");
 
     public event Action? CloseRequested;
 
@@ -74,7 +70,7 @@ public partial class PlayerView : UserControl
         // output starts ~0.5s late on a fresh player, so VLC drops and
         // flushes the first half-second of audio right after a (resumed)
         // start - an audible/visible lurch. DirectSound starts in time.
-        _libVlc = new LibVLC(enableDebugLogs: true, "--avcodec-hw=none", "--no-video-title-show", "--aout=directsound");
+        _libVlc = new LibVLC(enableDebugLogs: false, "--avcodec-hw=none", "--no-video-title-show", "--aout=directsound");
         _libVlc.Log += OnVlcLog;
         _mediaPlayer = new MediaPlayer(_libVlc)
         {
@@ -164,13 +160,12 @@ public partial class PlayerView : UserControl
 
     // ───────────────────────── Errors / end ─────────────────────────
 
+    // Warnings and errors only (debug level produced ~40 MB/day); AppLog
+    // redacts the login token from stream URLs and caps the file size.
     private void OnVlcLog(object? sender, LogEventArgs e)
     {
-        try
-        {
-            File.AppendAllText(VlcLogPath, $"[{DateTime.Now:O}] [{e.Level}] {e.Module}: {e.Message}\n");
-        }
-        catch { /* logging must never crash playback */ }
+        if (e.Level < LogLevel.Warning) return;
+        AppLog.Write("vlc.log", $"[{e.Level}] {e.Module}: {e.Message}");
     }
 
     private void OnEncounteredError(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() =>
