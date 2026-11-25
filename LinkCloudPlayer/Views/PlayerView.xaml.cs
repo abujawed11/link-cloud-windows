@@ -70,7 +70,11 @@ public partial class PlayerView : UserControl
         // crash (unrecoverable - can't be caught by any .NET try/catch) in
         // LibVLC-based players; this trades some CPU usage for reliability.
         // Set both globally and per-media, belt and suspenders.
-        _libVlc = new LibVLC(enableDebugLogs: true, "--avcodec-hw=none", "--no-video-title-show");
+        // --aout=directsound: measured on these files, Windows' default WASAPI
+        // output starts ~0.5s late on a fresh player, so VLC drops and
+        // flushes the first half-second of audio right after a (resumed)
+        // start - an audible/visible lurch. DirectSound starts in time.
+        _libVlc = new LibVLC(enableDebugLogs: true, "--avcodec-hw=none", "--no-video-title-show", "--aout=directsound");
         _libVlc.Log += OnVlcLog;
         _mediaPlayer = new MediaPlayer(_libVlc)
         {

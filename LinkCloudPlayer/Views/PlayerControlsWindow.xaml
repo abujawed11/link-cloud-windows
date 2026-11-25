@@ -106,6 +106,12 @@
           MouseMove="OnRootMouseMove" MouseLeave="OnRootMouseLeave"
           MouseLeftButtonDown="OnVideoAreaMouseDown" MouseWheel="OnVideoAreaMouseWheel">
 
+        <!-- Startup cover: solid black over the video until the first frame is
+             actually playing, then faded out (see Reveal). Hides libvlc
+             building/rebuilding its video surface and the jump to the resume
+             position, so playback simply fades in. -->
+        <Border x:Name="StartupCover" Background="Black" IsHitTestVisible="False" />
+
         <!-- Buffering spinner -->
         <StackPanel x:Name="BufferingPanel" HorizontalAlignment="Center" VerticalAlignment="Center"
                     IsHitTestVisible="False" Visibility="Collapsed">

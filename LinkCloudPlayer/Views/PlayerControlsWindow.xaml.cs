@@ -62,6 +62,10 @@ public partial class PlayerControlsWindow : Window
     // point that uses _mediaPlayer checks this first.
     private bool _closed;
 
+    // False until the first frame is actually playing; until then the
+    // StartupCover hides the video area and the bottom bar is invisible.
+    private bool _revealed;
+
     // UI state
     private bool _chromeVisible = true;
     private bool _isFullscreen;
@@ -108,6 +112,7 @@ public partial class PlayerControlsWindow : Window
         Loaded += (_, _) =>
         {
             SetVolume(_volume, showFlash: false);
+            BottomBar.Opacity = 0;
             SetBuffering(true, "Loading...");
             _hideTimer.Start();
             _bufferTimer.Start();
@@ -144,6 +149,7 @@ public partial class PlayerControlsWindow : Window
 
     public void ShowError(string message)
     {
+        Reveal();
         SetBuffering(false);
         ErrorText.Text = message;
         ErrorText.Visibility = Visibility.Visible;
@@ -301,6 +307,11 @@ public partial class PlayerControlsWindow : Window
 
     private void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs e) => OnUi(() =>
     {
+        if (!_revealed)
+        {
+            UpdateProgress(e.Time, _mediaPlayer.Length); // bar already at the resume point when it fades in
+            Reveal();
+        }
         if (_scrubbing) return;
         if (_pendingSeekMs is long target)
         {
@@ -322,7 +333,26 @@ public partial class PlayerControlsWindow : Window
         PlayPauseIcon.Data = (Geometry)FindResource("IconPause");
         SetBuffering(false);
         RestartHideTimer();
+        // Safety net in case no TimeChanged arrives (unusual streams).
+        if (!_revealed)
+        {
+            var fallback = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            fallback.Tick += (_, _) => { fallback.Stop(); if (!_closed) Reveal(); };
+            fallback.Start();
+        }
     });
+
+    // Fades out the startup cover and fades in the bottom bar.
+    private void Reveal()
+    {
+        if (_revealed) return;
+        _revealed = true;
+        SetBuffering(false);
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(350)) { EasingFunction = new QuadraticEase() };
+        fade.Completed += (_, _) => StartupCover.Visibility = Visibility.Collapsed;
+        StartupCover.BeginAnimation(OpacityProperty, fade);
+        Animate(BottomBar, OpacityProperty, 1, 350);
+    }
 
     private void OnPaused(object? sender, EventArgs e) => OnUi(() =>
     {
@@ -779,6 +809,7 @@ public partial class PlayerControlsWindow : Window
 
     private void SetBuffering(bool visible, string? text = null)
     {
+        if (!visible && !_revealed) return; // keep "Loading..." on the cover until playback is visible
         if (text is not null) BufferingText.Text = text;
         var wasVisible = BufferingPanel.Visibility == Visibility.Visible;
         if (visible == wasVisible) return;
