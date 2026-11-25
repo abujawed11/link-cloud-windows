@@ -4,7 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         mc:Ignorable="d"
-        Title="" Height="80" Width="1100"
+        Title="" Height="700" Width="1100"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize">
     <Window.Resources>
@@ -21,43 +21,66 @@
         </Style>
     </Window.Resources>
 
-    <Border Background="#CC000000" Padding="12,8" VerticalAlignment="Bottom">
-        <StackPanel>
-            <Slider x:Name="SeekSlider" Minimum="0" Maximum="1000"
-                    PreviewMouseDown="OnSeekDragStart" PreviewMouseUp="OnSeekDragEnd"
-                    ValueChanged="OnSeekValueChanged" Margin="0,0,0,6" />
+    <!-- Row 0 (the video area) is transparent but still hit-testable, so
+         clicks here (toggle play/pause) and double-clicks (fullscreen) reach
+         WPF instead of the native video surface underneath - see this
+         window's class comment. Row 1 is the actual opaque control bar. -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-            <DockPanel>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <Button x:Name="PlayPauseButton" Content="⏸" Style="{StaticResource BarButton}" Click="OnPlayPauseClick" />
-                    <Button Content="⏪10" Style="{StaticResource BarButton}" Click="OnSkipBackClick" />
-                    <Button Content="10⏩" Style="{StaticResource BarButton}" Click="OnSkipForwardClick" />
-                    <Button x:Name="MuteButton" Content="🔊" Style="{StaticResource BarButton}" Click="OnMuteClick" />
-                    <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Width="90"
-                            VerticalAlignment="Center" ValueChanged="OnVolumeChanged" />
-                    <TextBlock x:Name="TimeText" Foreground="White" VerticalAlignment="Center"
-                               Margin="12,0,0,0" Text="0:00 / 0:00" />
-                </StackPanel>
+        <Border Grid.Row="0" Background="Transparent"
+                MouseLeftButtonUp="OnVideoAreaClick" />
 
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                    <Button x:Name="SpeedButton" Content="1x" Style="{StaticResource BarButton}" Click="OnSpeedClick">
-                        <Button.ContextMenu>
-                            <ContextMenu x:Name="SpeedMenu" />
-                        </Button.ContextMenu>
-                    </Button>
-                    <Button x:Name="AudioButton" Content="Audio" Style="{StaticResource BarButton}" Click="OnAudioClick">
-                        <Button.ContextMenu>
-                            <ContextMenu x:Name="AudioMenu" />
-                        </Button.ContextMenu>
-                    </Button>
-                    <Button x:Name="SubtitleButton" Content="Subtitles" Style="{StaticResource BarButton}" Click="OnSubtitleClick">
-                        <Button.ContextMenu>
-                            <ContextMenu x:Name="SubtitleMenu" />
-                        </Button.ContextMenu>
-                    </Button>
-                    <Button x:Name="FullscreenButton" Content="⛶" Style="{StaticResource BarButton}" Click="OnFullscreenClick" />
-                </StackPanel>
-            </DockPanel>
-        </StackPanel>
-    </Border>
+        <TextBlock x:Name="BufferingText" Grid.Row="0" Text="Buffering..." Foreground="White"
+                   FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Visibility="Collapsed" IsHitTestVisible="False" />
+
+        <Border Grid.Row="1" Background="#CC000000" Padding="12,8">
+            <StackPanel>
+                <Grid Margin="0,0,0,6">
+                    <ProgressBar x:Name="BufferedBar" Height="4" Minimum="0" Maximum="100"
+                                 Foreground="#666" Background="#333" BorderThickness="0"
+                                 VerticalAlignment="Top" IsHitTestVisible="False" />
+                    <Slider x:Name="SeekSlider" Minimum="0" Maximum="1000" IsMoveToPointEnabled="True"
+                            PreviewMouseDown="OnSeekDragStart" PreviewMouseUp="OnSeekDragEnd"
+                            ValueChanged="OnSeekValueChanged" Background="Transparent" />
+                </Grid>
+
+                <DockPanel>
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                        <Button x:Name="PlayPauseButton" Content="⏸" Style="{StaticResource BarButton}" Click="OnPlayPauseClick" />
+                        <Button Content="⏪10" Style="{StaticResource BarButton}" Click="OnSkipBackClick" />
+                        <Button Content="10⏩" Style="{StaticResource BarButton}" Click="OnSkipForwardClick" />
+                        <Button x:Name="MuteButton" Content="🔊" Style="{StaticResource BarButton}" Click="OnMuteClick" />
+                        <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Width="90" IsMoveToPointEnabled="True"
+                                VerticalAlignment="Center" ValueChanged="OnVolumeChanged" />
+                        <TextBlock x:Name="TimeText" Foreground="White" VerticalAlignment="Center"
+                                   Margin="12,0,0,0" Text="0:00 / 0:00" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                        <Button x:Name="SpeedButton" Content="1x" Style="{StaticResource BarButton}" Click="OnSpeedClick">
+                            <Button.ContextMenu>
+                                <ContextMenu x:Name="SpeedMenu" />
+                            </Button.ContextMenu>
+                        </Button>
+                        <Button x:Name="AudioButton" Content="Audio" Style="{StaticResource BarButton}" Click="OnAudioClick">
+                            <Button.ContextMenu>
+                                <ContextMenu x:Name="AudioMenu" />
+                            </Button.ContextMenu>
+                        </Button>
+                        <Button x:Name="SubtitleButton" Content="Subtitles" Style="{StaticResource BarButton}" Click="OnSubtitleClick">
+                            <Button.ContextMenu>
+                                <ContextMenu x:Name="SubtitleMenu" />
+                            </Button.ContextMenu>
+                        </Button>
+                        <Button x:Name="FullscreenButton" Content="⛶" Style="{StaticResource BarButton}" Click="OnFullscreenClick" />
+                    </StackPanel>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
 </Window>

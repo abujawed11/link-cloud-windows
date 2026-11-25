@@ -40,7 +40,7 @@
                            Foreground="#e8eaee" Margin="0,0,0,16" />
 
                 <Label Content="Server URL" />
-                <TextBox x:Name="ServerUrlBox" Text="http://localhost:4000" />
+                <TextBox x:Name="ServerUrlBox" Text="https://link-cloud.abuwebdev.in" />
 
                 <Label Content="Email" />
                 <TextBox x:Name="EmailBox" />

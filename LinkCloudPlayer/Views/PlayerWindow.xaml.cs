@@ -17,8 +17,6 @@ public partial class PlayerWindow : Window
         "vlc.log"
     );
 
-    private const double ControlBarHeight = 86;
-
     public PlayerWindow(string title, string streamUrl)
     {
         InitializeComponent();
@@ -28,14 +26,15 @@ public partial class PlayerWindow : Window
         // video decode/render is the most common source of a silent native
         // crash (unrecoverable - can't be caught by any .NET try/catch) in
         // LibVLC-based players; this trades some CPU usage for reliability.
-        // If playback is smooth without crashing, this can be relaxed later.
+        // Set both globally and per-media, belt and suspenders.
         _libVlc = new LibVLC(enableDebugLogs: true, "--avcodec-hw=none");
         _libVlc.Log += OnVlcLog;
         _mediaPlayer = new MediaPlayer(_libVlc);
         VlcVideoView.MediaPlayer = _mediaPlayer;
-        _mediaPlayer.EncounteredError += (_, _) => Dispatcher.Invoke(ShowPlaybackError);
+        _mediaPlayer.EncounteredError += OnEncounteredError;
 
         using var media = new Media(_libVlc, streamUrl, FromType.FromLocation);
+        media.AddOption(":avcodec-hw=none");
         _mediaPlayer.Play(media);
 
         Loaded += OnLoaded;
@@ -54,17 +53,18 @@ public partial class PlayerWindow : Window
     }
 
     // The controls window is a separate top-level window overlaid on this
-    // one (see PlayerControlsWindow's class comment for why) - it has to be
-    // manually kept in sync with this window's screen position/size.
+    // one, spanning its entire area (see PlayerControlsWindow's class
+    // comment for why) - it has to be manually kept in sync with this
+    // window's screen position/size.
     private void PositionControls()
     {
         if (_controls is null || WindowState == WindowState.Minimized) return;
         var topLeft = PointToScreen(new Point(0, 0));
         var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(this);
         _controls.Left = topLeft.X / dpi.DpiScaleX;
+        _controls.Top = topLeft.Y / dpi.DpiScaleY;
         _controls.Width = ActualWidth;
-        _controls.Height = ControlBarHeight;
-        _controls.Top = (topLeft.Y / dpi.DpiScaleY) + ActualHeight - ControlBarHeight;
+        _controls.Height = ActualHeight;
     }
 
     private void OnVlcLog(object? sender, LogEventArgs e)
@@ -76,13 +76,13 @@ public partial class PlayerWindow : Window
         catch { /* logging must never crash playback */ }
     }
 
+    private void OnEncounteredError(object? sender, EventArgs e) => Dispatcher.BeginInvoke(ShowPlaybackError);
+
     private void ShowPlaybackError()
     {
         ErrorText.Text = "Can't play this file. The codec may not be supported, or the server is unreachable.";
         ErrorText.Visibility = Visibility.Visible;
     }
-
-    private void OnVideoClick(object sender, MouseButtonEventArgs e) => _controls?.TogglePlayPause();
 
     private void ToggleFullscreen()
     {
@@ -134,7 +134,8 @@ public partial class PlayerWindow : Window
 
     private void Cleanup()
     {
-        _controls?.Close();
+        _controls?.Close(); // unsubscribes its own MediaPlayer event handlers first
+        _mediaPlayer.EncounteredError -= OnEncounteredError;
         _mediaPlayer.Stop();
         VlcVideoView.MediaPlayer = null;
         _mediaPlayer.Dispose();

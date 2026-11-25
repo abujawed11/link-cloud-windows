@@ -7,11 +7,16 @@ using Microsoft.Win32;
 namespace LinkCloudPlayer.Views;
 
 // A separate, borderless window overlaid on top of PlayerWindow's video
-// surface. Necessary because LibVLCSharp's VideoView hosts a native child
-// window (HwndHost) for rendering, and a child HWND always paints over
-// ordinary WPF-drawn siblings in the same window ("airspace") - any control
-// bar placed directly in PlayerWindow would be invisible and unclickable.
-// PlayerWindow keeps this positioned over its own bottom edge.
+// surface, spanning its ENTIRE area (not just a bottom bar). Necessary
+// because LibVLCSharp's VideoView hosts a native child window (HwndHost) for
+// rendering, and a child HWND both paints over AND captures mouse input
+// ahead of ordinary WPF siblings in the same window ("airspace") - a click
+// handler on VideoView itself fires unreliably, and any WPF control bar
+// placed directly in PlayerWindow would be invisible and unclickable.
+// Covering the whole area (transparent except the bottom bar) means every
+// click - whether toggling play/pause over the video or pressing a button -
+// goes through this window instead. PlayerWindow keeps this positioned over
+// its own bounds.
 public partial class PlayerControlsWindow : Window
 {
     private readonly MediaPlayer _mediaPlayer;
@@ -28,17 +33,28 @@ public partial class PlayerControlsWindow : Window
 
         _mediaPlayer.TimeChanged += OnTimeChanged;
         _mediaPlayer.LengthChanged += OnLengthChanged;
-        _mediaPlayer.Playing += (_, _) => Dispatcher.Invoke(() => PlayPauseButton.Content = "⏸");
-        _mediaPlayer.Paused += (_, _) => Dispatcher.Invoke(() => PlayPauseButton.Content = "▶");
-        _mediaPlayer.EndReached += (_, _) => Dispatcher.Invoke(() => PlayPauseButton.Content = "▶");
+        _mediaPlayer.Playing += OnPlaying;
+        _mediaPlayer.Paused += OnPaused;
+        _mediaPlayer.EndReached += OnEndReached;
+        _mediaPlayer.Buffering += OnBuffering;
 
         BuildSpeedMenu();
         Loaded += (_, _) => PopulateTrackMenusWhenReady();
-        Closed += (_, _) =>
-        {
-            _mediaPlayer.TimeChanged -= OnTimeChanged;
-            _mediaPlayer.LengthChanged -= OnLengthChanged;
-        };
+        Closed += (_, _) => UnsubscribeAll();
+    }
+
+    private void UnsubscribeAll()
+    {
+        // Unsubscribed before PlayerWindow.Cleanup() calls Stop()/Dispose() on
+        // the same _mediaPlayer - a native callback landing mid-teardown and
+        // trying to marshal onto a UI thread that is itself blocked inside
+        // that teardown call is exactly how this used to hang on close.
+        _mediaPlayer.TimeChanged -= OnTimeChanged;
+        _mediaPlayer.LengthChanged -= OnLengthChanged;
+        _mediaPlayer.Playing -= OnPlaying;
+        _mediaPlayer.Paused -= OnPaused;
+        _mediaPlayer.EndReached -= OnEndReached;
+        _mediaPlayer.Buffering -= OnBuffering;
     }
 
     // Audio/subtitle track lists aren't populated until libvlc has parsed the
@@ -126,7 +142,7 @@ public partial class PlayerControlsWindow : Window
 
     private void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs e)
     {
-        Dispatcher.Invoke(() =>
+        Dispatcher.BeginInvoke(() =>
         {
             if (_isSeeking) return;
             var length = Math.Max(_mediaPlayer.Length, 1);
@@ -137,8 +153,27 @@ public partial class PlayerControlsWindow : Window
 
     private void OnLengthChanged(object? sender, MediaPlayerLengthChangedEventArgs e)
     {
-        Dispatcher.Invoke(() => TimeText.Text = $"{FormatTime(_mediaPlayer.Time)} / {FormatTime(e.Length)}");
+        Dispatcher.BeginInvoke(() => TimeText.Text = $"{FormatTime(_mediaPlayer.Time)} / {FormatTime(e.Length)}");
     }
+
+    private void OnPlaying(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() =>
+    {
+        PlayPauseButton.Content = "⏸";
+        BufferingText.Visibility = Visibility.Collapsed;
+    });
+
+    private void OnPaused(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
+    private void OnEndReached(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
+
+    // Fires during the initial load and again on a re-buffer (e.g. right
+    // after a seek); libvlc does not expose a continuous "buffered ahead"
+    // range the way HTML5 video does for a plain HTTP source, so this is the
+    // closest available preloading signal.
+    private void OnBuffering(object? sender, MediaPlayerBufferingEventArgs e) => Dispatcher.BeginInvoke(() =>
+    {
+        BufferedBar.Value = e.Cache;
+        BufferingText.Visibility = e.Cache < 100 ? Visibility.Visible : Visibility.Collapsed;
+    });
 
     private static string FormatTime(long ms)
     {
@@ -151,6 +186,12 @@ public partial class PlayerControlsWindow : Window
     {
         if (_mediaPlayer.IsPlaying) _mediaPlayer.Pause();
         else _mediaPlayer.Play();
+    }
+
+    private void OnVideoAreaClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount >= 2) FullscreenToggleRequested?.Invoke();
+        else TogglePlayPause();
     }
 
     private void OnPlayPauseClick(object sender, RoutedEventArgs e) => TogglePlayPause();

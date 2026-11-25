@@ -9,7 +9,7 @@
         Background="Black"
         KeyDown="OnKeyDown">
     <Grid>
-        <vlc:VideoView x:Name="VlcVideoView" MouseLeftButtonUp="OnVideoClick" />
+        <vlc:VideoView x:Name="VlcVideoView" />
 
         <TextBlock x:Name="ErrorText" Foreground="#f87171" FontSize="16"
                    HorizontalAlignment="Center" VerticalAlignment="Center"
