@@ -10,13 +10,13 @@ using Microsoft.Win32;
 
 namespace LinkCloudPlayer.Views;
 
-// A separate, borderless window overlaid on top of PlayerWindow's video
+// A separate, borderless window overlaid on top of PlayerView's video
 // surface, spanning its ENTIRE area (not just a bottom bar). Necessary
 // because LibVLCSharp's VideoView hosts a native child window (HwndHost) for
 // rendering, and a child HWND both paints over AND captures mouse input
 // ahead of ordinary WPF siblings in the same window ("airspace") - any WPF
-// control placed directly in PlayerWindow would be invisible and
-// unclickable. PlayerWindow keeps this window positioned over its client
+// control placed directly in PlayerView would be invisible and
+// unclickable. PlayerView keeps this window positioned over its
 // area.
 //
 // Because this is a layered window (AllowsTransparency), Windows lets clicks
@@ -33,6 +33,14 @@ public partial class PlayerControlsWindow : Window
 
     private readonly MediaPlayer _mediaPlayer;
     private readonly DispatcherTimer _hideTimer;
+    private readonly DispatcherTimer _bufferTimer;
+
+    // Buffered-range estimate (see UpdateBuffered)
+    private readonly long _totalBytes;
+    private readonly Func<long?> _readBytes;
+    private long _bufferBaseBytes;
+    private long _bufferBaseMs;
+    private double _bufferedFraction;
 
     // Seek state
     private bool _scrubbing;
@@ -56,11 +64,20 @@ public partial class PlayerControlsWindow : Window
     public event Action? ExitFullscreenRequested;
     public event Action? CloseRequested;
 
-    public PlayerControlsWindow(MediaPlayer mediaPlayer, string title)
+    /// <param name="totalBytes">File size, for the buffered-range estimate (0 = unknown).</param>
+    /// <param name="readBytes">Bytes the player has read from the stream so far.</param>
+    /// <param name="startMs">Where playback starts (resume position).</param>
+    public PlayerControlsWindow(MediaPlayer mediaPlayer, string title, long totalBytes, Func<long?> readBytes, long startMs)
     {
         InitializeComponent();
         _mediaPlayer = mediaPlayer;
         TitleText.Text = title;
+        _totalBytes = totalBytes;
+        _readBytes = readBytes;
+        _bufferBaseMs = startMs;
+
+        _bufferTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _bufferTimer.Tick += (_, _) => UpdateBuffered();
 
         _hideTimer = new DispatcherTimer { Interval = HideDelay };
         _hideTimer.Tick += (_, _) =>
@@ -85,17 +102,19 @@ public partial class PlayerControlsWindow : Window
             SetVolume(_volume, showFlash: false);
             SetBuffering(true, "Loading...");
             _hideTimer.Start();
+            _bufferTimer.Start();
         };
         Closed += (_, _) => UnsubscribeAll();
     }
 
     private void UnsubscribeAll()
     {
-        // Unsubscribed before PlayerWindow.Cleanup() calls Stop()/Dispose() on
+        // Unsubscribed before PlayerView.Cleanup() calls Stop()/Dispose() on
         // the same _mediaPlayer - a native callback landing mid-teardown and
         // trying to marshal onto a UI thread that is itself blocked inside
         // that teardown call is exactly how this used to hang on close.
         _hideTimer.Stop();
+        _bufferTimer.Stop();
         _mediaPlayer.TimeChanged -= OnTimeChanged;
         _mediaPlayer.LengthChanged -= OnLengthChanged;
         _mediaPlayer.Playing -= OnPlaying;
@@ -105,7 +124,7 @@ public partial class PlayerControlsWindow : Window
         _mediaPlayer.Buffering -= OnBuffering;
     }
 
-    // ───────────────────────── Public API (used by PlayerWindow) ─────────────────────────
+    // ───────────────────────── Public API (used by PlayerView) ─────────────────────────
 
     public void SetFullscreenState(bool isFullscreen)
     {
@@ -167,6 +186,9 @@ public partial class PlayerControlsWindow : Window
                 return true;
             case >= Key.NumPad0 and <= Key.NumPad9:
                 SeekToFraction((key - Key.NumPad0) / 10.0);
+                return true;
+            case Key.Back:
+                CloseRequested?.Invoke();
                 return true;
             case Key.Escape:
                 if (ClosePanels()) return true;
@@ -230,6 +252,10 @@ public partial class PlayerControlsWindow : Window
         ms = Math.Clamp(ms, 0, Math.Max(length - 500, 0));
         _pendingSeekMs = ms;
         _pendingSeekAt = DateTime.UtcNow;
+        // Restart the buffered estimate from the new position.
+        _bufferBaseMs = ms;
+        _bufferBaseBytes = _readBytes() ?? 0;
+        _bufferedFraction = 0;
         _mediaPlayer.Time = ms;
         UpdateProgress(ms, length);
     }
@@ -315,7 +341,25 @@ public partial class PlayerControlsWindow : Window
         _displayFraction = fraction;
         var width = SeekArea.ActualWidth;
         SeekFill.Width = fraction * width;
+        SeekBufferedFill.Width = Math.Max(_bufferedFraction, fraction) * width;
         Canvas.SetLeft(SeekThumb, fraction * width - SeekThumb.Width / 2);
+    }
+
+    // libvlc doesn't expose which byte ranges are downloaded (unlike a
+    // browser's <video>.buffered), so this estimates it: bytes read since the
+    // last seek, as a share of the file size, added to where that seek
+    // landed. Assumes a roughly even bitrate across the file - close enough
+    // for a progress hint.
+    private void UpdateBuffered()
+    {
+        var length = _mediaPlayer.Length;
+        if (length <= 0 || _totalBytes <= 0) return;
+        if (_readBytes() is not long read) return;
+        if (read < _bufferBaseBytes) _bufferBaseBytes = 0; // stats were reset
+
+        var est = (double)_bufferBaseMs / length + (double)(read - _bufferBaseBytes) / _totalBytes;
+        _bufferedFraction = Math.Clamp(est, 0, 1);
+        if (!_scrubbing) RenderSeekBar(_displayFraction);
     }
 
     private void UpdateTimeText(long timeMs, long lengthMs)

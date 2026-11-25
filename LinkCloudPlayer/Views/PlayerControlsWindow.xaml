@@ -187,8 +187,10 @@
                           MouseLeftButtonDown="OnSeekMouseDown" MouseMove="OnSeekMouseMove"
                           MouseLeftButtonUp="OnSeekMouseUp" LostMouseCapture="OnSeekLostCapture">
                         <Grid x:Name="SeekTrack" Height="4" VerticalAlignment="Center">
-                            <Border Background="#4DFFFFFF" CornerRadius="2" />
-                            <Border x:Name="SeekHoverFill" Background="#66FFFFFF" CornerRadius="2"
+                            <Border Background="#33FFFFFF" CornerRadius="2" />
+                            <Border x:Name="SeekBufferedFill" Background="#66FFFFFF" CornerRadius="2"
+                                    HorizontalAlignment="Left" Width="0" />
+                            <Border x:Name="SeekHoverFill" Background="#40FFFFFF" CornerRadius="2"
                                     HorizontalAlignment="Left" Width="0" Visibility="Collapsed" />
                             <Border x:Name="SeekFill" Background="{StaticResource AccentBrush}" CornerRadius="2"
                                     HorizontalAlignment="Left" Width="0" />
